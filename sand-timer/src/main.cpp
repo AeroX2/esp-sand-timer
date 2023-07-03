@@ -125,13 +125,7 @@ void setup() {
 }
 
 void loop() {
-  if (dmpReady) {
-    mpu.dmpGetCurrentFIFOPacket(fifoBuffer);
-    mpu.dmpGetQuaternion(&q, fifoBuffer);
-    mpu.dmpGetGravity(&gravity, &q);
-  }
-
-  simulation.updateAndDraw(&backgroundLayer, gravity);
+  simulation.updateAndDraw(&backgroundLayer, dmpReady ? &mpu : nullptr);
   Debug.handle();
   FailSafe.loop();
 

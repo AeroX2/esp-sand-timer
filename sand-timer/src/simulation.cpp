@@ -5,9 +5,13 @@
 #include <vector>
 
 #include "Layer_Background.h"
+#include "MPU6050_6Axis_MotionApps_V6_12.h"
 #include "RemoteDebug.h"
-#include "helper_3dmath.h"
 extern RemoteDebug Debug;
+
+Quaternion q;
+uint8_t fifoBuffer[64];
+VectorFloat gravity;
 
 class Grid;
 
@@ -227,10 +231,6 @@ class Simulation {
         grid->set(particle->x, particle->y, 's');
       }
     }
-    // grid->clear();
-    // for (Particle* particle : particles) {
-    //   grid->set(particle->x, particle->y, particle->type);
-    // }
   }
 
   void draw(SMLayerBackground<rgb24, 0>* layer) {
@@ -241,8 +241,13 @@ class Simulation {
     layer->swapBuffers();
   }
 
-  void updateAndDraw(SMLayerBackground<rgb24, 0>* layer, VectorFloat gravity) {
+  void updateAndDraw(SMLayerBackground<rgb24, 0>* layer, MPU6050* mpu) {
     if (millis() - lastUpdateMillis > 1000 / 60) {
+      if (mpu != nullptr) {
+        mpu->dmpGetCurrentFIFOPacket(fifoBuffer);
+        mpu->dmpGetQuaternion(&q, fifoBuffer);
+        mpu->dmpGetGravity(&gravity, &q);
+      }
       update(gravity);
       lastUpdateMillis = millis();
     }
@@ -250,7 +255,7 @@ class Simulation {
   }
 
  private:
-  int lastUpdateMillis = 3000;
+  int lastUpdateMillis = 1000;
   std::vector<Particle*> particles;
   Grid* grid;
 };
