@@ -6,7 +6,7 @@
  * @brief Library to add a simple fail safe mode to any ESP32 or ESP8266 project
  */
 
-#include "FailSafe.h"
+#include "failsafe.h"
 
 #include <SPIFFS.h>
 

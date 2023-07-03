@@ -1,0 +1,16 @@
+diff --git a/.pio/libdeps/esp32doit-devkit-v1/SmartMatrix/src/esp32_i2s_parallel.c b/.pio/libdeps/esp32doit-devkit-v1/SmartMatrix/src/esp32_i2s_parallel.c
+
+index e4db0b1..e81c154 100644
+--- a/.pio/libdeps/esp32doit-devkit-v1/SmartMatrix/src/esp32_i2s_parallel.c
++++ b/.pio/libdeps/esp32doit-devkit-v1/SmartMatrix/src/esp32_i2s_parallel.c
+@@ -32,6 +32,10 @@
+ #include "esp_heap_caps.h"
+ #include "esp32_i2s_parallel.h"
+ 
++#include "soc/gpio_periph.h"
++#include "esp32-hal.h"
++#include "hal/gpio_types.h"
++
+ typedef struct {
+     volatile lldesc_t *dmadesc_a, *dmadesc_b;
+     int desccount_a, desccount_b;
