@@ -2,12 +2,11 @@
 #include <MatrixHardware_ESP32_V0.h>
 #include <SmartMatrix.h>
 #include <WiFiManager.h>
-
 // AsyncElegantOTA must be after WifiManager to prevent build issues.
 #include <AsyncElegantOTA.h>
 
+#include "MPU6050_6Axis_MotionApps_V6_12.h"
 #include "RemoteDebug.h"
-
 #include "failsafe.h"
 #include "simulation.cpp"
 
@@ -47,8 +46,12 @@ SMARTMATRIX_ALLOCATE_BACKGROUND_LAYER(backgroundLayer, kMatrixWidth,
                                       kBackgroundLayerOptions);
 
 const int defaultBrightness = (100 * 255) / 100;  // full (100%) brightness
-// const int defaultBrightness = (15*255)/100;       // dim: 15% brightness
-const int defaultScrollOffset = 6;
+
+MPU6050 mpu;
+Quaternion q;
+uint8_t fifoBuffer[64];
+VectorFloat gravity;
+bool dmpReady = false;
 
 Simulation simulation;
 
@@ -95,15 +98,40 @@ void setup() {
 
   backgroundLayer.enableColorCorrection(true);
 
-  Serial.println("Version 4");
+  Wire.begin(23, 14);
+  int8_t devStatus = mpu.dmpInitialize();
 
-  delay(5000);
+  // supply your own gyro offsets here, scaled for min sensitivity
+  mpu.setXAccelOffset(-2279);
+  mpu.setYAccelOffset(761);
+  mpu.setZAccelOffset(1609);
+  mpu.setXGyroOffset(55);
+  mpu.setYGyroOffset(-51);
+  mpu.setZGyroOffset(15);
+  // make sure it worked (returns 0 if so)
+  if (devStatus == 0) {
+    mpu.CalibrateAccel(6);
+    mpu.CalibrateGyro(6);
 
-  simulation.init(64, 32);
+    mpu.setDMPEnabled(true);
+    dmpReady = true;
+  }
+
+  Serial.println("Version 5");
+
+  delay(3000);
+
+  simulation.init(kMatrixWidth, kMatrixHeight);
 }
 
 void loop() {
-  simulation.updateAndDraw(&backgroundLayer);
+  if (dmpReady) {
+    mpu.dmpGetCurrentFIFOPacket(fifoBuffer);
+    mpu.dmpGetQuaternion(&q, fifoBuffer);
+    mpu.dmpGetGravity(&gravity, &q);
+  }
+
+  simulation.updateAndDraw(&backgroundLayer, gravity);
   Debug.handle();
   FailSafe.loop();
 

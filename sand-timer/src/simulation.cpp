@@ -6,9 +6,8 @@
 
 #include "Layer_Background.h"
 #include "RemoteDebug.h"
+#include "helper_3dmath.h"
 extern RemoteDebug Debug;
-
-#define WORLD_MULTIPLIER 3
 
 class Grid;
 
@@ -16,13 +15,14 @@ class Particle {
  public:
   int x;
   int y;
+  char type = ' ';
   bool movable = false;
   Particle(int x, int y) {
     this->x = x;
     this->y = y;
   }
 
-  virtual void update(Grid* grid){};
+  virtual void update(Grid* grid, VectorInt16 gravity){};
   virtual void draw(SMLayerBackground<rgb24, 0>* layer){};
 };
 
@@ -33,147 +33,224 @@ class Grid {
   Grid(int width, int height) {
     this->width = width;
     this->height = height;
-    internal_grid = new int8_t[width * height];
+    internal_grid = new char[width * height];
 
     for (int x = 0; x < width; x++) {
       for (int y = 0; y < height; y++) {
-        set(x, y, 0);
+        set(x, y, ' ');
       }
     }
   }
 
-  int8_t get(int x, int y) { return internal_grid[y * width + x]; }
-  void set(int x, int y, int count) { internal_grid[y * width + x] = count; }
-
-  char check(int x, int y) {
-    if (x < 0 || x > width - 1 || y < 0 || y > height - 1) return 'e';
-    if (get(x, y) != 0) return 's';
-    return 'n';
+  char get(int x, int y) {
+    if (x < 0 || x > width - 1 || y < 0 || y > height - 1) return ' ';
+    return internal_grid[y * width + x];
+  }
+  void set(int x, int y, char particle) {
+    if (x < 0 || x > width - 1 || y < 0 || y > height - 1) return;
+    internal_grid[y * width + x] = particle;
   }
 
   void clear() {
     for (int x = 0; x < width; x++) {
       for (int y = 0; y < height; y++) {
-        set(x, y, 0);
+        set(x, y, ' ');
       }
     }
   }
 
  private:
-  int8_t* internal_grid;
+  char* internal_grid;
 };
 
 class Wall : public Particle {
  public:
-  Wall(int x, int y) : Particle(x, y){};
+  Wall(int x, int y) : Particle(x, y) { type = 'w'; };
+  void draw(SMLayerBackground<rgb24, 0>* layer) {
+    layer->drawPixel(x, y, {0, 192, 0});
+  }
+};
+
+struct Coord {
+  int x;
+  int y;
 };
 
 class Sand : public Particle {
+  Coord bounds[9][2] = {
+      {{1, 0}, {0, 1}},  //
+      {{0, 0}, {2, 0}},  //
+      {{1, 0}, {2, 1}},  //
+      {{0, 0}, {0, 2}},  //
+      {{0, 0}, {0, 0}},  //
+      {{2, 0}, {2, 2}},  //
+      {{0, 1}, {1, 2}},  //
+      {{0, 2}, {2, 2}},  //
+      {{1, 2}, {2, 1}},  //
+  };
+
  public:
-  int vx = 0;
-  int vy = 0;
-  bool movable = true;
-  Sand(int x, int y) : Particle(x, y){};
-  void update(Grid* grid) {
-    char test = grid->check(x, y + 1);
-    if (test == 'n') {
-      y++;
+  Sand(int x, int y) : Particle(x, y) {
+    type = 's';
+    movable = true;
+
+    tx = x * 256;
+    ty = y * 256;
+  };
+  void update(Grid* grid, VectorInt16 gravity) {
+    vx += gravity.x;
+    vy += gravity.y;
+    // Serial.printf("Grav: %d, %d\n", gravity.x, gravity.y);
+    // Serial.printf("Vel: %d, %d\n", vx, vy);
+
+    float v2 = vx * vx + vy * vy;
+    if (v2 > 65536) {                     // If v^2 > 65536, then v > 256
+      float v = sqrt(v2);                 // Velocity vector magnitude
+      vx = (int)(256.0 * (float)vx / v);  // Maintain heading &
+      vy = (int)(256.0 * (float)vy / v);  // limit magnitude
+    }
+
+    tx += vx;
+    ty += vy;
+
+    int nx = tx / 256;
+    int ny = ty / 256;
+
+    if (nx < 0) {
+      nx = 0;
+      tx = 0;
+      vx = 0;
+    } else if (nx > grid->width - 1) {
+      nx = grid->width - 1;
+      tx = nx * 256;
+      vx = 0;
+    }
+
+    if (ny < 0) {
+      ny = 0;
+      ty = 0;
+      vy = 0;
+    } else if (ny > grid->height - 1) {
+      ny = grid->height - 1;
+      ty = ny * 256;
+      vy = 0;
+    }
+
+    if (grid->get(nx, ny) == ' ') {
+      // No collision
+      x = nx;
+      y = ny;
       return;
     }
 
-    test = grid->check(x - 1, y + 1);
-    if (test == 'n') {
-      x--;
-      y++;
+    int dx = nx - x;
+    int dy = ny - y;
+    if (dx == 0 && dy == 0) return;
+
+    // TODO Fix this bug
+    if (dx < -1 || dx > 1 || dy < -1 || dy > 1) return;
+
+    Coord c1 = bounds[(dy + 1) * 3 + (dx + 1)][0];
+    c1.x--;
+    c1.y--;
+    nx = c1.x + x;
+    ny = c1.y + y;
+    if (grid->get(nx, ny) == ' ') {
+      x = nx;
+      y = ny;
       return;
     }
 
-    test = grid->check(x + 1, y + 1);
-    if (test == 'n') {
-      x++;
-      y++;
+    Coord c2 = bounds[(dy + 1) * 3 + (dx + 1)][1];
+    c2.x--;
+    c2.y--;
+    nx = c2.x + x;
+    ny = c2.y + y;
+    if (grid->get(nx, ny) == ' ') {
+      x = nx;
+      y = ny;
       return;
     }
-  }
-};
 
-const rgb24 defaultBackgroundColor = {0x40, 0, 0};
-
-class Simulation {
- public:
-  void init(int displayWidth, int displayHeight) {
-    worldGrid = new Grid(displayWidth * WORLD_MULTIPLIER,
-                         displayHeight * WORLD_MULTIPLIER);
-    displayGrid = new Grid(displayWidth, displayHeight);
-
-    for (int x = 0; x < 10; x++) {
-      for (int y = 0; y < 10; y++) {
-        Particle* particle = new Sand(12 + x, 12 + y);
-        particles.push_back(particle);
-        worldGrid->set(x, y, 1);
-      }
+    if (dx != 0) {
+      tx = x * 256;
+      vx = 0;
     }
 
-    particles.push_back(new Wall(10, 3));
-    worldGrid->set(10, 3, -1);
-  }
-
-  void update() {
-    for (Particle* particle : particles) {
-      particle->update(worldGrid);
-    }
-    worldGrid->clear();
-    for (Particle* particle : particles) {
-      worldGrid->set(particle->x, particle->y, particle->movable ? 1 : -1);
+    if (dy != 0) {
+      ty = y * 256;
+      vy = 0;
     }
   }
 
   void draw(SMLayerBackground<rgb24, 0>* layer) {
-    layer->fillScreen(defaultBackgroundColor);
-
-    displayGrid->clear();
-    for (int x = 0; x < worldGrid->width; x++) {
-      for (int y = 0; y < worldGrid->height; y++) {
-        int dx = x / WORLD_MULTIPLIER;
-        int dy = y / WORLD_MULTIPLIER;
-        int particle = worldGrid->get(x, y);
-        if (particle == -1) {
-          displayGrid->set(dx, dy, -1);
-        } else if (particle > 0) {
-          displayGrid->set(dx, dy, displayGrid->get(dx, dy) + 1);
-        }
-      }
-    }
-
-    for (int x = 0; x < displayGrid->width; x++) {
-      for (int y = 0; y < displayGrid->height; y++) {
-        int pixelCount = displayGrid->get(x, y);
-        if (pixelCount == 0) continue;
-
-        // Assume this is a wall.
-        if (pixelCount == -1) pixelCount = WORLD_MULTIPLIER;
-
-        uint8_t pixelDensity = map(pixelCount, 0, WORLD_MULTIPLIER, 0, 255);
-
-        layer->drawPixel(
-            x, y, {pixelDensity, pixelDensity, pixelDensity});
-      }
-    }
-
-    layer->swapBuffers();
-  }
-
-  void updateAndDraw(SMLayerBackground<rgb24, 0>* layer) {
-    if (millis() - lastUpdateMillis > 1000 / 20) {
-      update();
-      draw(layer);
-      lastUpdateMillis = millis();
-    }
+    layer->drawPixel(x, y, {192, 192, 192});
   }
 
  private:
-  int lastUpdateMillis = 0;
+  int tx = 0;
+  int ty = 0;
+  int vx = 0;
+  int vy = 0;
+  int ax = 0;
+  int ay = 0;
+};
+
+class Simulation {
+ public:
+  void init(int worldWidth, int worldHeight) {
+    grid = new Grid(worldWidth, worldHeight);
+
+    for (int x = 0; x < 5; x++) {
+      for (int y = 0; y < 5; y++) {
+        Particle* particle = new Sand(12 + x, 12 + y);
+        particles.push_back(particle);
+        grid->set(12 + x, 12 + y, 's');
+      }
+    }
+
+    // particles.push_back(new Wall(10, 3));
+    // grid->set(10, 3, 'w');
+  }
+
+  void update(VectorFloat gravity) {
+    VectorFloat gravityNormalised = gravity.getNormalized();
+    VectorInt16 gravityScaled = {(int16_t)(gravityNormalised.x * 256),
+                                 (int16_t)(gravityNormalised.y * -256),
+                                 (int16_t)(gravityNormalised.z * 256)};
+    for (Particle* particle : particles) {
+      int x = particle->x;
+      int y = particle->y;
+      particle->update(grid, gravityScaled);
+      if (particle->x != x || particle->y != y) {
+        grid->set(x, y, ' ');
+        grid->set(particle->x, particle->y, 's');
+      }
+    }
+    // grid->clear();
+    // for (Particle* particle : particles) {
+    //   grid->set(particle->x, particle->y, particle->type);
+    // }
+  }
+
+  void draw(SMLayerBackground<rgb24, 0>* layer) {
+    layer->fillScreen({0x40, 0, 0});
+    for (Particle* particle : particles) {
+      particle->draw(layer);
+    }
+    layer->swapBuffers();
+  }
+
+  void updateAndDraw(SMLayerBackground<rgb24, 0>* layer, VectorFloat gravity) {
+    if (millis() - lastUpdateMillis > 1000 / 60) {
+      update(gravity);
+      lastUpdateMillis = millis();
+    }
+    draw(layer);
+  }
+
+ private:
+  int lastUpdateMillis = 3000;
   std::vector<Particle*> particles;
-  Grid* worldGrid;
-  Grid* displayGrid;
+  Grid* grid;
 };
